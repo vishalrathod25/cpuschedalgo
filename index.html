@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RVisualizer | CPU Scheduling Simulator & Visualizer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">RV</div>
+      <div>
+        <h1>RVisualizer</h1>
+        <div class="tagline">Interactive CPU Scheduling Visualizer for Students</div>
+      </div>
+    </div>
+    <div class="header-links">
+      <span class="badge">OS Lab Assistant</span>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- LEFT SIDEBAR: INPUTS & SETTINGS -->
+    <aside style="display: flex; flex-direction: column; gap: 24px;">
+      
+      <!-- 1. Algorithm Selector -->
+      <section class="panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          Algorithm Settings
+        </div>
+        
+        <div class="form-group">
+          <label for="algo-select">Scheduling Algorithm</label>
+          <select id="algo-select">
+            <option value="fcfs">First-Come First-Served (FCFS)</option>
+            <option value="sjf-np">Shortest Job First (SJF, Non-Preemptive)</option>
+            <option value="sjf-p">Shortest Remaining Time First (SRTF, Preemptive)</option>
+            <option value="rr">Round Robin (RR)</option>
+            <option value="priority-np">Priority (Non-Preemptive)</option>
+            <option value="priority-p">Priority (Preemptive)</option>
+          </select>
+        </div>
+        
+        <div class="form-group" id="quantum-container" style="display: none;">
+          <label for="time-quantum">Time Quantum</label>
+          <input type="number" id="time-quantum" min="1" max="20" value="2">
+        </div>
+
+        <div class="form-group" id="aging-container" style="display: none; border-top: 1px dashed var(--border-light); padding-top: 12px; margin-top: 6px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <input type="checkbox" id="enable-aging" style="width: auto; cursor: pointer; margin: 0;">
+            <label for="enable-aging" style="cursor: pointer; font-weight: 600;">Enable Priority Aging</label>
+          </div>
+          <div id="aging-threshold-wrapper" style="display: none; flex-direction: column; gap: 4px;">
+            <label for="aging-threshold">Age Priority every (s)</label>
+            <input type="number" id="aging-threshold" min="1" max="20" value="5">
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Dynamic Process Inputs -->
+      <section class="panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>
+          Add Processes
+        </div>
+        
+        <form id="process-form" onsubmit="return false;">
+          <div class="row-3" style="margin-bottom: 12px;">
+            <div class="form-group">
+              <label for="arrival-time">Arrival Time</label>
+              <input type="number" id="arrival-time" min="0" max="99" value="0">
+            </div>
+            <div class="form-group">
+              <label for="burst-time">Burst Time</label>
+              <input type="number" id="burst-time" min="1" max="99" value="5">
+            </div>
+            <div class="form-group" id="priority-container">
+              <label for="priority-val">Priority</label>
+              <input type="number" id="priority-val" min="1" max="99" value="1">
+            </div>
+          </div>
+          <div class="row-2">
+            <button class="btn btn-secondary" id="btn-add-random" type="button">
+              + Random
+            </button>
+            <button class="btn btn-primary" id="btn-add-process" type="submit">
+              Add Process
+            </button>
+          </div>
+        </form>
+
+        <div class="table-wrapper" style="max-height: 200px; overflow-y: auto;">
+          <table id="process-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Arrival</th>
+                <th>Burst</th>
+                <th>Priority</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Dynamic Rows inserted by JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 3. Learning Scenarios (Presets) -->
+      <section class="panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"></path></svg>
+          Educational Presets
+        </div>
+        <div class="presets-grid">
+          <button class="preset-card" id="preset-convoy">
+            <div class="preset-name">1. FCFS Convoy Effect</div>
+            <div class="preset-desc">Large process arrives first, holding up short ones.</div>
+          </button>
+          <button class="preset-card" id="preset-starve">
+            <div class="preset-name">2. SRTF Starvation Demo</div>
+            <div class="preset-desc">Long processes wait indefinitely due to incoming short ones.</div>
+          </button>
+          <button class="preset-card" id="preset-quantum">
+            <div class="preset-name">3. Round Robin Quantum Influence</div>
+            <div class="preset-desc">See how time quantum size affects context switches.</div>
+          </button>
+          <button class="preset-card" id="preset-priority">
+            <div class="preset-name">4. Priority Scheduling</div>
+            <div class="preset-desc">High-priority tasks pre-empting lower priority ones.</div>
+          </button>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- RIGHT MAIN PANEL: VISUALIZER & RESULTS -->
+    <main>
+      
+      <!-- Educational Alert Tip (Context Sensitive) -->
+      <div class="education-banner" id="education-banner">
+        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        <div class="education-banner-content">
+          <h4 id="edu-title">First-Come First-Served (FCFS)</h4>
+          <p id="edu-text">This algorithm is non-preemptive. The CPU executes processes in the order they arrive. While simple, FCFS can suffer from the "Convoy Effect" where small processes wait a long time behind a large process.</p>
+        </div>
+      </div>
+
+      <!-- Simulation Core Viewport -->
+      <section class="sim-viewport">
+        <div class="control-bar">
+          <div class="player-controls">
+            <button class="btn btn-secondary btn-icon-only" id="btn-step-prev" title="Step Back">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <button class="btn btn-primary" id="btn-play-pause">
+              <svg id="play-icon" width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="pause-icon" width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              <span id="play-text">Play</span>
+            </button>
+            <button class="btn btn-secondary btn-icon-only" id="btn-step-next" title="Step Forward">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <button class="btn btn-secondary btn-icon-only" id="btn-reset" title="Reset">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            </button>
+          </div>
+
+          <div class="speed-control">
+            <label for="speed-slider">Speed</label>
+            <input type="range" id="speed-slider" class="speed-slider" min="1" max="5" value="3">
+          </div>
+
+          <div class="time-counter">
+            Time: <span id="current-time">0</span>s
+          </div>
+        </div>
+
+        <!-- Pipeline Lanes -->
+        <div class="pipeline-container">
+          <!-- Ready Queue -->
+          <div class="pipeline-lane" id="lane-ready">
+            <div class="lane-header">
+              <span>Ready Queue</span>
+              <span class="badge" id="ready-count">0</span>
+            </div>
+            <div class="lane-items" id="ready-items">
+              <!-- Animated processes inside Ready queue -->
+              <div style="font-size: 12px; color: var(--text-light); text-align: center; width: 100%; margin-top: 10px;">Queue Empty</div>
+            </div>
+          </div>
+
+          <!-- Flow Arrow 1 -->
+          <div class="pipeline-arrow" title="Processes move from Ready Queue into execution core">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+
+          <!-- CPU Core -->
+          <div class="pipeline-lane" id="lane-cpu">
+            <div class="lane-header">
+              <span>CPU Core</span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; margin-top: 10px;">
+              <div class="cpu-core-slot" id="cpu-slot">IDLE</div>
+            </div>
+          </div>
+
+          <!-- Flow Arrow 2 -->
+          <div class="pipeline-arrow" title="Completed processes move from CPU Core to Terminated state">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+
+          <!-- Completed List -->
+          <div class="pipeline-lane" id="lane-completed">
+            <div class="lane-header">
+              <span>Terminated</span>
+              <span class="badge" id="completed-count">0</span>
+            </div>
+            <div class="lane-items" id="completed-items">
+              <!-- Process cards that have terminated -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Gantt Chart Panel -->
+      <section class="panel gantt-panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
+          Gantt Chart View
+        </div>
+        
+        <div class="gantt-timeline-container">
+          <div class="gantt-chart" id="gantt-chart">
+            <!-- Dynamically populated timeline blocks -->
+          </div>
+          <div class="gantt-ticks" id="gantt-ticks">
+            <!-- Dynamically populated time labels -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Metrics Summary Panel -->
+      <section class="panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"></path></svg>
+          Performance Metrics
+        </div>
+        
+        <div class="metrics-row">
+          <div class="metric-card">
+            <div class="metric-lbl">Avg Waiting Time</div>
+            <div class="metric-val" id="val-avg-wt">0.00s</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">Avg Turnaround Time</div>
+            <div class="metric-val" id="val-avg-tat">0.00s</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">Avg Response Time</div>
+            <div class="metric-val" id="val-avg-rt">0.00s</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">CPU Utilization</div>
+            <div class="metric-val" id="val-cpu-util">100%</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Side-by-Side Algorithm Comparison Panel -->
+      <section class="panel comparison-section">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"></path></svg>
+          Side-by-Side Algorithm Performance Comparison
+        </div>
+
+        <div class="comparison-grid">
+          <div class="chart-card">
+            <div class="chart-header">Average Waiting Time (Lower is Better)</div>
+            <div class="bar-chart-container" id="wt-comparison-chart">
+              <!-- Injected dynamically via JS -->
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">Average Turnaround Time (Lower is Better)</div>
+            <div class="bar-chart-container" id="tat-comparison-chart">
+              <!-- Injected dynamically via JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Interactive Learn Hub Section -->
+      <section class="panel learn-hub-panel">
+        <div class="panel-title">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          Learn Hub: Core OS Scheduling Concepts
+        </div>
+
+        <div class="learn-tabs">
+          <button class="learn-tab active" data-tab="formulas">Core Formulas</button>
+          <button class="learn-tab" data-tab="algorithms">Scheduling Algorithms</button>
+          <button class="learn-tab" data-tab="starve-convoy">Starvation & Convoy Effect</button>
+          <button class="learn-tab" data-tab="aging-theory">Aging (Starvation Fix)</button>
+        </div>
+
+        <div class="learn-tab-content active" id="tab-formulas">
+          <div class="edu-grid">
+            <div class="formula-card">
+              <h3>Completion Time (CT)</h3>
+              <p class="formula-desc">The time instant when a process finishes execution.</p>
+              <div class="formula-math">CT = Time of termination</div>
+            </div>
+            <div class="formula-card">
+              <h3>Turnaround Time (TAT)</h3>
+              <p class="formula-desc">The total time spent by a process in the system from arrival to completion.</p>
+              <div class="formula-math">TAT = CT - Arrival Time</div>
+            </div>
+            <div class="formula-card">
+              <h3>Waiting Time (WT)</h3>
+              <p class="formula-desc">The total time spent by a process waiting in the ready queue.</p>
+              <div class="formula-math">WT = TAT - Burst Time</div>
+            </div>
+            <div class="formula-card">
+              <h3>Response Time (RT)</h3>
+              <p class="formula-desc">The time from arrival to the first time the process gets scheduled on the CPU.</p>
+              <div class="formula-math">RT = First Run Time - Arrival Time</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="learn-tab-content" id="tab-algorithms">
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div style="border-bottom: 1px solid var(--border-light); padding-bottom: 8px;">
+              <h3 style="font-size: 15px; color: var(--accent-primary);">1. First-Come First-Served (FCFS)</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Simple FIFO queue logic. Simplest scheduler, non-preemptive. High potential for Convoy Effect.</p>
+            </div>
+            <div style="border-bottom: 1px solid var(--border-light); padding-bottom: 8px;">
+              <h3 style="font-size: 15px; color: var(--accent-primary);">2. Shortest Job First (SJF)</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selects process with shortest burst. Mathematically optimal for minimizing average waiting times. Hard to predict burst time in practice.</p>
+            </div>
+            <div style="border-bottom: 1px solid var(--border-light); padding-bottom: 8px;">
+              <h3 style="font-size: 15px; color: var(--accent-primary);">3. Shortest Remaining Time First (SRTF)</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Preemptive version of SJF. Current task is preempted if a new process arrives with a shorter remaining run time.</p>
+            </div>
+            <div style="border-bottom: 1px solid var(--border-light); padding-bottom: 8px;">
+              <h3 style="font-size: 15px; color: var(--accent-primary);">4. Round Robin (RR)</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Each process gets a slice of time (Quantum), then gets rotated back to queue. Prevents starvation, but introduces context switch overhead.</p>
+            </div>
+            <div>
+              <h3 style="font-size: 15px; color: var(--accent-primary);">5. Priority Scheduling (NP / Preemptive)</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Schedules based on numeric priorities (here, lower = higher priority). In preemptive mode, high priority tasks interrupt running processes instantly.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="learn-tab-content" id="tab-starve-convoy">
+          <div class="starve-convoy-container">
+            <div class="topic-box">
+              <h3 style="color: #C53030; font-size: 15px; margin-bottom: 6px;">The Convoy Effect (FCFS)</h3>
+              <p style="font-size: 13px; color: var(--text-muted);">
+                Occurs when a single CPU-bound process with a huge burst time runs first, forcing multiple short I/O-bound processes to wait. CPU utilization drops since I/O devices sit idle.
+                <br><em>Try the **FCFS Convoy Effect** preset to see this visually!</em>
+              </p>
+            </div>
+            <div class="topic-box">
+              <h3 style="color: #C53030; font-size: 15px; margin-bottom: 6px;">Process Starvation (SJF / SRTF / Priority)</h3>
+              <p style="font-size: 13px; color: var(--text-muted);">
+                A scheduling anomaly where a process waits indefinitely because other processes with higher priority (or shorter burst times) keep arriving and taking over the CPU.
+                <br><em>Try the **SRTF Starvation Demo** preset to see P1 starve.</em>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="learn-tab-content" id="tab-aging-theory">
+          <div style="font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; gap: 12px;">
+            <h3 style="color: var(--color-success); font-size: 16px;">What is Aging?</h3>
+            <p>
+              Aging is a technique used to avoid **Starvation** in priority-based scheduling systems. It works by gradually increasing the priority of processes that wait in the ready queue for a long time.
+            </p>
+            <p>
+              For example, if a process has a starting low priority of `5`, and we set the aging threshold to `5s`, every `5s` the process spends waiting in the Ready queue, its priority decreases by `1` (which increases its priority level: `5 -> 4 -> 3 -> 2 -> 1`).
+            </p>
+            <p>
+              Eventually, the waiting process becomes the highest priority task in the queue, forcing the CPU to run it and solving starvation!
+            </p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
