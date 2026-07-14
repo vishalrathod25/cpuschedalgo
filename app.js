@@ -449,9 +449,7 @@ function runScheduler(processList, algo, quantum, agingEnabled = false, agingThr
         // Incremented wait time for all jobs currently in ready queue at this tick:
         job.waitTimeInQueue++;
         if (job.waitTimeInQueue >= agingThreshold) {
-          if (job.priority > 1) {
-            job.priority--; // decrease value = increase priority
-          }
+          job.priority++; // increase value = increase priority
           job.waitTimeInQueue = 0; // reset wait timer
         }
       });
@@ -512,7 +510,7 @@ function runScheduler(processList, algo, quantum, agingEnabled = false, agingThr
       // Sorting must happen each time CPU becomes free to respect current priorities (inc. aged ones).
       if (!activeJob && readyQueue.length > 0) {
         readyQueue.sort((a, b) => {
-          if (a.priority !== b.priority) return a.priority - b.priority;
+          if (a.priority !== b.priority) return b.priority - a.priority;
           if (a.arrival !== b.arrival) return a.arrival - b.arrival;
           return a.id.localeCompare(b.id);
         });
@@ -527,7 +525,7 @@ function runScheduler(processList, algo, quantum, agingEnabled = false, agingThr
       }
       if (readyQueue.length > 0) {
         readyQueue.sort((a, b) => {
-          if (a.priority !== b.priority) return a.priority - b.priority;
+          if (a.priority !== b.priority) return b.priority - a.priority;
           if (a.arrival !== b.arrival) return a.arrival - b.arrival;
           return a.id.localeCompare(b.id);
         });
