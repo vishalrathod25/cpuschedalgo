@@ -258,6 +258,13 @@ function addProcess(arrival, burst, priority) {
 
 function removeProcess(index) {
   processes.splice(index, 1);
+  // After deletion, reassign IDs sequentially to prevent gaps like P1, P3, P4
+  processes.forEach((p, i) => {
+    p.id = `P${i + 1}`;
+    p.colorClass = processColors[i % processColors.length];
+  });
+  // Reset counter to match actual count so next addition is always sequential
+  processCounter = processes.length;
   renderProcessTable();
   triggerCalculation();
 }
@@ -292,6 +299,8 @@ function loadDefaultProcesses() {
 function loadPreset(presetName) {
   resetSimulation();
   processes = [];
+  // Don't reset processCounter to 0 — derive it from the current max to avoid PID reuse across sessions.
+  // But since this is a fresh load from a preset, reset is expected:
   processCounter = 0;
   
   if (presetName === 'convoy') {
@@ -412,16 +421,27 @@ function runScheduler(processList, algo, quantum, agingEnabled = false, agingThr
   // Complete jobs tracking
   const completedJobs = [];
   
+  // Track which jobs have already been enqueued so we don't add them twice
+  const enqueuedIds = new Set();
+  
   // We run until all jobs are completely processed
   while (completedJobs.length < jobQueue.length) {
-    // 1. Fetch new arrivals at time t
-    const newArrivals = jobQueue.filter(j => j.arrival === t);
+    // 1. Fetch new arrivals at time t (only jobs not yet in any queue/running/done)
+    const newArrivals = jobQueue.filter(j =>
+      j.arrival === t &&
+      !enqueuedIds.has(j.id) &&
+      !completedJobs.find(c => c.id === j.id) &&
+      (activeJob ? activeJob.id !== j.id : true)
+    );
     
     // Sort arrivals by ID to maintain a consistent load order
     newArrivals.sort((a, b) => a.id.localeCompare(b.id));
     
-    // Add new arrivals to Ready Queue
-    readyQueue.push(...newArrivals);
+    // Add new arrivals to Ready Queue and mark as enqueued
+    newArrivals.forEach(j => {
+      readyQueue.push(j);
+      enqueuedIds.add(j.id);
+    });
 
     // 1.5. Apply aging if enabled (only for priority schedulers)
     if (agingEnabled && (algo === 'priority-np' || algo === 'priority-p')) {
@@ -488,6 +508,8 @@ function runScheduler(processList, algo, quantum, agingEnabled = false, agingThr
     } 
     else if (algo === 'priority-np') {
       // Non-Preemptive Priority (Lower priority number = Higher Priority)
+      // Pick the highest priority job whenever the CPU is idle.
+      // Sorting must happen each time CPU becomes free to respect current priorities (inc. aged ones).
       if (!activeJob && readyQueue.length > 0) {
         readyQueue.sort((a, b) => {
           if (a.priority !== b.priority) return a.priority - b.priority;
