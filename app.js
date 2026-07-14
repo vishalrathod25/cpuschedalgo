@@ -8,6 +8,15 @@ let timeQuantum = 2;
 let agingEnabled = false;
 let agingRate = 5;
 
+// --- QUIZ STATE MANAGEMENT ---
+let quizMode = false;
+let quizCurrentTime = 0;
+let quizIndex = 0;
+let quizDecisionPoints = [];
+let quizCorrectCount = 0;
+let quizTotalQuestions = 0;
+let quizFeedbackActive = false;
+
 // Playback timeline snapshot cache
 let timeline = [];
 let maxTime = 0;
@@ -74,6 +83,17 @@ const tatComparisonChart = document.getElementById('tat-comparison-chart');
 const educationBanner = document.getElementById('education-banner');
 const eduTitle = document.getElementById('edu-title');
 const eduText = document.getElementById('edu-text');
+
+// Quiz Mode DOM elements
+const modeAuto = document.getElementById('mode-auto');
+const modeQuiz = document.getElementById('mode-quiz');
+const quizPanel = document.getElementById('quiz-panel');
+const quizScoreCorrect = document.getElementById('quiz-score-correct');
+const quizScoreTotal = document.getElementById('quiz-score-total');
+const quizPromptText = document.getElementById('quiz-prompt-text');
+const quizOptions = document.getElementById('quiz-options');
+const quizFeedback = document.getElementById('quiz-feedback');
+const btnQuizReset = document.getElementById('btn-quiz-reset');
 
 // Educational commentary data
 const algoEducationInfo = {
@@ -225,6 +245,24 @@ function setupEventListeners() {
       const contentId = `tab-${tab.dataset.tab}`;
       document.getElementById(contentId).classList.add('active');
     });
+  });
+
+  // Mode Selection Tabs
+  modeAuto.addEventListener('click', () => {
+    modeAuto.classList.add('active');
+    modeQuiz.classList.remove('active');
+    exitQuiz();
+  });
+
+  modeQuiz.addEventListener('click', () => {
+    modeQuiz.classList.add('active');
+    modeAuto.classList.remove('active');
+    initQuiz();
+  });
+
+  // Quiz Reset button
+  btnQuizReset.addEventListener('click', () => {
+    initQuiz();
   });
 }
 
@@ -383,11 +421,22 @@ function triggerCalculation() {
   
   // Update UI components with computed metrics
   updateMetricsDisplay(result.metrics);
-  renderGanttChart(result.ganttBlocks, maxTime);
-  renderComparisonCharts();
   
-  // Display initial snapshot
-  renderTimeStep(0);
+  if (quizMode) {
+    renderComparisonCharts();
+    // Initialize or refresh quiz data
+    quizDecisionPoints = getDecisionPoints(timeline, processes, selectedAlgo, timeQuantum);
+    quizIndex = 0;
+    quizFeedbackActive = false;
+    const firstTime = quizDecisionPoints[0] || 0;
+    renderQuizTimeStep(firstTime);
+    showQuizQuestion(firstTime);
+  } else {
+    renderGanttChart(result.ganttBlocks, maxTime);
+    renderComparisonCharts();
+    // Display initial snapshot
+    renderTimeStep(0);
+  }
 }
 
 function runScheduler(processList, algo, quantum, agingEnabled = false, agingThreshold = 5) {
@@ -928,4 +977,429 @@ function clearVisualization() {
   valCpuUtil.innerText = '100%';
   wtComparisonChart.innerHTML = '';
   tatComparisonChart.innerHTML = '';
+}
+
+// --- MANUAL SCHEDULER QUIZ LOGIC ---
+
+function getDecisionPoints(timeline, processes, algo, quantum) {
+  const points = new Set();
+  points.add(0); // Time 0 is always a decision point
+
+  const maxTime = timeline.length - 1;
+  let activeStart = 0;
+  let lastActiveId = null;
+
+  for (let t = 1; t <= maxTime; t++) {
+    const prevSnapshot = timeline[t - 1];
+    const currSnapshot = timeline[t];
+
+    const prevActive = prevSnapshot.activeId;
+    const currActive = currSnapshot.activeId;
+
+    // 1. Process completion: if prevActive was running but completes at t
+    if (prevActive && prevSnapshot.remainingBursts[prevActive] === 1) {
+      points.add(t);
+    }
+
+    // 2. New arrivals
+    const hasNewArrival = processes.some(p => p.arrival === t);
+    if (hasNewArrival) {
+      if (algo === 'sjf-p' || algo === 'priority-p') {
+        points.add(t);
+      }
+      if (algo === 'rr' && !prevActive) {
+        points.add(t);
+      }
+    }
+
+    // 3. RR quantum expiration
+    if (algo === 'rr' && prevActive) {
+      if (prevActive !== lastActiveId) {
+        activeStart = t - 1;
+        lastActiveId = prevActive;
+      }
+      const timeSpent = t - activeStart;
+      if (timeSpent === quantum) {
+        points.add(t);
+      }
+    }
+  }
+
+  // Remove maxTime since no decisions are made once everything is finished
+  points.delete(maxTime);
+
+  return Array.from(points).sort((a, b) => a - b);
+}
+
+function getSchedulingReason(t, correctId, snapshot, processes, algo, quantum, prevActiveId) {
+  if (!correctId || correctId === 'IDLE') {
+    const activeProcesses = processes.filter(p => p.arrival <= t && snapshot.remainingBursts[p.id] > 0);
+    if (activeProcesses.length === 0) {
+      return "No processes have arrived yet or all processes have completed execution, so the CPU must remain IDLE.";
+    } else {
+      return "No ready processes are available to run at this time, so the CPU is IDLE.";
+    }
+  }
+
+  const p = processes.find(proc => proc.id === correctId);
+  const currentBurst = snapshot.remainingBursts[correctId];
+  const currentPri = snapshot.priorities[correctId];
+
+  const algoNames = {
+    'fcfs': 'First-Come First-Served (FCFS)',
+    'sjf-np': 'Shortest Job First (SJF - Non-Preemptive)',
+    'sjf-p': 'Shortest Remaining Time First (SRTF)',
+    'rr': 'Round Robin (RR)',
+    'priority-np': 'Priority (Non-Preemptive)',
+    'priority-p': 'Priority (Preemptive)'
+  };
+  const algoName = algoNames[algo] || algo;
+
+  const readyIds = snapshot.readyQueueIds.filter(id => id !== correctId);
+  const readyPills = readyIds.map(id => {
+    const rp = processes.find(proc => proc.id === id);
+    const remB = snapshot.remainingBursts[id];
+    const pri = snapshot.priorities[id];
+    if (algo.startsWith('priority')) {
+      return `${id} (Priority: ${pri})`;
+    } else if (algo === 'sjf-p' || algo === 'sjf-np') {
+      return `${id} (Burst: ${remB}s)`;
+    } else {
+      return id;
+    }
+  }).join(', ');
+
+  const readyText = readyPills ? ` compared to other ready process(es): [${readyPills}]` : '';
+
+  if (algo === 'fcfs') {
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${algoName} is non-preemptive. The currently running process ${correctId} must continue running until completion.`;
+    }
+    return `${algoName} schedules the process that arrived first. ${correctId} arrived at Time = ${p.arrival}s${readyText}.`;
+  }
+
+  if (algo === 'sjf-np') {
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${algoName} is non-preemptive. The currently running process ${correctId} must continue running until completion.`;
+    }
+    const tied = readyIds.find(id => {
+      const rp = processes.find(proc => proc.id === id);
+      return rp.burst === p.burst;
+    });
+    if (tied) {
+      const rp = processes.find(proc => proc.id === tied);
+      return `${algoName} selected ${correctId} because both ${correctId} and ${tied} have a burst time of ${p.burst}s, but ${correctId} arrived first (Time = ${p.arrival}s vs ${rp.arrival}s).`;
+    }
+    return `${algoName} selected ${correctId} because it has the shortest burst time (${p.burst}s)${readyText}.`;
+  }
+
+  if (algo === 'sjf-p') {
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${correctId} continues running as it still has the shortest remaining burst time (${currentBurst}s)${readyText}.`;
+    }
+    if (prevActiveId && prevActiveId !== correctId) {
+      const prevRem = snapshot.remainingBursts[prevActiveId] || 0;
+      return `${correctId} preempts ${prevActiveId} because its remaining burst time (${currentBurst}s) is shorter than ${prevActiveId}'s remaining burst time (${prevRem}s).`;
+    }
+    return `${correctId} is scheduled because it has the shortest remaining burst time (${currentBurst}s) among all ready processes${readyText}.`;
+  }
+
+  if (algo === 'rr') {
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${correctId} has not completed its Time Quantum of ${quantum}s and continues executing.`;
+    }
+    if (prevActiveId && prevActiveId !== correctId) {
+      const prevRem = snapshot.remainingBursts[prevActiveId] || 0;
+      if (prevRem === 0) {
+        return `${prevActiveId} has completed. ${correctId} is selected from the front of the Ready Queue.`;
+      } else {
+        return `Time Quantum of ${quantum}s expired for ${prevActiveId}. It is placed at the back of the Ready Queue, and ${correctId} is selected from the front.`;
+      }
+    }
+    return `${correctId} is selected from the front of the Ready Queue.`;
+  }
+
+  if (algo === 'priority-np') {
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${algoName} is non-preemptive. The currently running process ${correctId} must continue running until completion.`;
+    }
+    let priText = `priority value of ${currentPri}`;
+    if (currentPri < p.priority) {
+      priText = `aged priority value of ${currentPri} (original: ${p.priority})`;
+    }
+    return `${algoName} selected ${correctId} because it has the highest priority (${priText}, where lower is higher priority)${readyText}.`;
+  }
+
+  if (algo === 'priority-p') {
+    let priText = `priority ${currentPri}`;
+    if (currentPri < p.priority) {
+      priText = `aged priority ${currentPri} (original: ${p.priority})`;
+    }
+    if (prevActiveId && prevActiveId === correctId) {
+      return `${correctId} continues executing as it still has the highest priority (${priText})${readyText}.`;
+    }
+    if (prevActiveId && prevActiveId !== correctId) {
+      const prevPri = snapshot.priorities[prevActiveId];
+      return `${correctId} (priority ${currentPri}) preempts ${prevActiveId} (priority ${prevPri}) because it has a higher priority (lower value).`;
+    }
+    return `${correctId} is scheduled because it has the highest priority (${priText})${readyText}.`;
+  }
+
+  return "";
+}
+
+function getPartialGanttBlocks(ganttBlocks, limitTime) {
+  const partial = [];
+  for (let block of ganttBlocks) {
+    if (block.startTime >= limitTime) {
+      break;
+    }
+    const duration = Math.min(block.duration, limitTime - block.startTime);
+    partial.push({
+      ...block,
+      duration: duration
+    });
+  }
+  return partial;
+}
+
+function renderGanttChartForQuiz(limitTime) {
+  const result = runScheduler(processes, selectedAlgo, timeQuantum, agingEnabled, agingRate);
+  const partialBlocks = getPartialGanttBlocks(result.ganttBlocks, limitTime);
+  renderGanttChart(partialBlocks, limitTime);
+}
+
+function renderQuizTimeStep(t) {
+  if (timeline.length === 0) return;
+  
+  currentTimeDisplay.innerText = t;
+  currentTime = t;
+
+  const state = timeline[t];
+  
+  let prevActiveId = null;
+  if (t > 0) {
+    const prevSnapshot = timeline[t - 1];
+    if (prevSnapshot.activeId && state.remainingBursts[prevSnapshot.activeId] > 0) {
+      prevActiveId = prevSnapshot.activeId;
+    }
+  }
+
+  const activeProcesses = processes.filter(p => p.arrival <= t && state.remainingBursts[p.id] > 0);
+  
+  // Render Ready Queue
+  readyItemsContainer.innerHTML = '';
+  const readyCount = activeProcesses.filter(p => p.id !== prevActiveId).length;
+  readyCountBadge.innerText = readyCount;
+  
+  if (readyCount === 0) {
+    readyItemsContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-light); text-align: center; width: 100%; margin-top: 10px;">Queue Empty</div>`;
+  } else {
+    activeProcesses.forEach(p => {
+      if (p.id === prevActiveId) return;
+      const item = document.createElement('div');
+      item.className = `p-block ${p.colorClass}`;
+      const rem = state.remainingBursts[p.id];
+      
+      let priorityIndicator = '';
+      if (state.priorities && state.priorities[p.id] !== undefined) {
+        const currentPriority = state.priorities[p.id];
+        const originalPriority = p.priority;
+        if (currentPriority < originalPriority) {
+          priorityIndicator = ` <span class="aged-badge" title="Original: ${originalPriority}">Aged: ${currentPriority}</span>`;
+        } else if (selectedAlgo.startsWith('priority')) {
+          priorityIndicator = ` <span style="font-size: 10px; margin-left: 6px; opacity: 0.8;">Pri: ${currentPriority}</span>`;
+        }
+      }
+      
+      item.innerHTML = `${p.id} <span>Rem: ${rem}s</span>${priorityIndicator}`;
+      readyItemsContainer.appendChild(item);
+    });
+  }
+
+  // Render CPU
+  if (prevActiveId) {
+    const p = processes.find(proc => proc.id === prevActiveId);
+    let priText = '';
+    if (state.priorities && state.priorities[prevActiveId] !== undefined && selectedAlgo.startsWith('priority')) {
+      const currentPriority = state.priorities[prevActiveId];
+      priText = ` (${prevActiveId} [Pri: ${currentPriority}])`;
+    } else {
+      priText = ` (${prevActiveId})`;
+    }
+    cpuSlot.innerText = `Running${priText}`;
+    cpuSlot.className = `cpu-core-slot active ${p.colorClass}`;
+  } else {
+    cpuSlot.innerText = 'IDLE';
+    cpuSlot.className = 'cpu-core-slot';
+  }
+
+  // Render Completed
+  completedItemsContainer.innerHTML = '';
+  const completedIds = processes
+    .filter(p => state.remainingBursts[p.id] === 0)
+    .map(p => p.id);
+  completedCountBadge.innerText = completedIds.length;
+  
+  completedIds.forEach(id => {
+    const p = processes.find(proc => proc.id === id);
+    if (p) {
+      const item = document.createElement('div');
+      item.className = `p-block ${p.colorClass}`;
+      item.style.opacity = '0.6';
+      item.innerHTML = `${p.id} <span>Done</span>`;
+      completedItemsContainer.appendChild(item);
+    }
+  });
+
+  renderGanttChartForQuiz(t);
+}
+
+function showQuizQuestion(t) {
+  quizPromptText.innerHTML = `At <strong>Time = ${t}s</strong>, select the next process to run:`;
+  quizOptions.innerHTML = '';
+  quizFeedback.style.display = 'none';
+  quizFeedbackActive = false;
+
+  const state = timeline[t];
+  const activeProcesses = processes.filter(p => p.arrival <= t && state.remainingBursts[p.id] > 0);
+  
+  activeProcesses.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'quiz-btn';
+    btn.innerText = p.id;
+    btn.dataset.id = p.id;
+    btn.addEventListener('click', () => handleQuizAnswer(p.id));
+    quizOptions.appendChild(btn);
+  });
+
+  const idleBtn = document.createElement('button');
+  idleBtn.className = 'quiz-btn';
+  idleBtn.innerText = 'IDLE';
+  idleBtn.dataset.id = 'IDLE';
+  idleBtn.addEventListener('click', () => handleQuizAnswer('IDLE'));
+  quizOptions.appendChild(idleBtn);
+}
+
+function handleQuizAnswer(selectedId) {
+  if (quizFeedbackActive) return;
+  quizFeedbackActive = true;
+
+  const t = quizDecisionPoints[quizIndex];
+  const correctActiveId = timeline[t].activeId;
+  const correctId = correctActiveId ? correctActiveId : 'IDLE';
+
+  let prevActiveId = null;
+  if (t > 0) {
+    const prevSnapshot = timeline[t - 1];
+    if (prevSnapshot.activeId && timeline[t].remainingBursts[prevSnapshot.activeId] > 0) {
+      prevActiveId = prevSnapshot.activeId;
+    }
+  }
+
+  const reason = getSchedulingReason(t, correctActiveId, timeline[t], processes, selectedAlgo, timeQuantum, prevActiveId);
+
+  quizTotalQuestions++;
+  quizScoreTotal.innerText = quizTotalQuestions;
+
+  const buttons = quizOptions.querySelectorAll('.quiz-btn');
+  buttons.forEach(btn => {
+    btn.disabled = true;
+    if (btn.dataset.id === correctId) {
+      btn.classList.add('btn-correct');
+    }
+  });
+
+  const nextBtnContainer = document.createElement('div');
+  nextBtnContainer.id = 'quiz-next-container';
+  nextBtnContainer.style.display = 'flex';
+  nextBtnContainer.style.justifyContent = 'flex-end';
+  nextBtnContainer.style.marginTop = '12px';
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-primary';
+  nextBtn.style.padding = '6px 14px';
+  nextBtn.style.fontSize = '12px';
+  nextBtn.innerText = quizIndex < quizDecisionPoints.length - 1 ? 'Next Step →' : 'Finish Quiz 🏁';
+  nextBtn.addEventListener('click', advanceQuiz);
+  nextBtnContainer.appendChild(nextBtn);
+
+  if (selectedId === correctId) {
+    quizCorrectCount++;
+    quizScoreCorrect.innerText = quizCorrectCount;
+    
+    quizFeedback.className = 'quiz-feedback success';
+    quizFeedback.innerHTML = `<strong>Correct!</strong> ${reason}`;
+  } else {
+    buttons.forEach(btn => {
+      if (btn.dataset.id === selectedId) {
+        btn.classList.add('btn-incorrect');
+      }
+    });
+
+    quizFeedback.className = 'quiz-feedback error';
+    quizFeedback.innerHTML = `<strong>Incorrect.</strong> ${reason}`;
+  }
+
+  quizFeedback.style.display = 'block';
+  quizFeedback.appendChild(nextBtnContainer);
+}
+
+function advanceQuiz() {
+  const container = document.getElementById('quiz-next-container');
+  if (container) container.remove();
+
+  if (quizIndex < quizDecisionPoints.length - 1) {
+    quizIndex++;
+    const nextTime = quizDecisionPoints[quizIndex];
+    renderQuizTimeStep(nextTime);
+    showQuizQuestion(nextTime);
+  } else {
+    endQuiz();
+  }
+}
+
+function initQuiz() {
+  quizMode = true;
+  quizCorrectCount = 0;
+  quizTotalQuestions = 0;
+  quizFeedbackActive = false;
+  quizScoreCorrect.innerText = '0';
+  quizScoreTotal.innerText = '0';
+
+  document.querySelector('.player-controls').style.display = 'none';
+  document.querySelector('.speed-control').style.display = 'none';
+  quizPanel.style.display = 'flex';
+
+  triggerCalculation();
+}
+
+function endQuiz() {
+  quizFeedback.className = 'quiz-feedback success';
+  quizFeedback.innerHTML = `<h3>Quiz Completed! 🎓</h3>
+  <p style="margin-top: 6px; font-size: 14px;">You scored <strong>${quizCorrectCount} / ${quizTotalQuestions}</strong>.</p>
+  <p style="margin-top: 6px; font-size: 13px;">Standard simulator controls have been restored. You can play, pause, or step through the Gantt chart to review your results.</p>`;
+  
+  // Clean up option buttons
+  quizOptions.innerHTML = '';
+  quizPromptText.innerText = 'Completed!';
+
+  // Show normal simulation controls
+  document.querySelector('.player-controls').style.display = 'flex';
+  document.querySelector('.speed-control').style.display = 'flex';
+
+  // Render the final full timeline state
+  const result = runScheduler(processes, selectedAlgo, timeQuantum, agingEnabled, agingRate);
+  renderGanttChart(result.ganttBlocks, maxTime);
+  renderTimeStep(maxTime);
+}
+
+function exitQuiz() {
+  quizMode = false;
+  quizPanel.style.display = 'none';
+  
+  document.querySelector('.player-controls').style.display = 'flex';
+  document.querySelector('.speed-control').style.display = 'flex';
+  
+  triggerCalculation();
 }
